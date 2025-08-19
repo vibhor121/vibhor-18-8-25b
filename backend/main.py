@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 from bson import ObjectId
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 import os
 from dotenv import load_dotenv
@@ -45,7 +45,7 @@ if ENVIRONMENT == "production":
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex="https://.*\.netlify\.app|https://.*\.onrender\.com|http://localhost:3000|http://127\.0\.0\.1:3000",
+    allow_origin_regex=r"https://.*\.netlify\.app|https://.*\.onrender\.com|http://localhost:3000|http://127\.0\.0\.1:3000",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -124,9 +124,9 @@ def authenticate_user(username: str, password: str):
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -172,7 +172,7 @@ async def register_user(user: UserCreate):
         "username": user.username,
         "email": user.email,
         "hashed_password": hashed_password,
-        "created_at": datetime.utcnow()
+        "created_at": datetime.now(timezone.utc)
     }
     
     result = users_collection.insert_one(user_doc)
@@ -208,7 +208,7 @@ async def create_todo(todo: TodoCreate, current_user: dict = Depends(get_current
         "title": todo.title,
         "description": todo.description,
         "completed": todo.completed,
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
         "user_id": current_user["_id"]
     }
     
