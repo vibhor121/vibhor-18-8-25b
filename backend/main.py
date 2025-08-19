@@ -154,32 +154,43 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 # Routes
 @app.post("/register", response_model=UserResponse)
 async def register_user(user: UserCreate):
-    # Check if user already exists
-    if users_collection.find_one({"username": user.username}):
+    try:
+        # Check if user already exists
+        if users_collection.find_one({"username": user.username}):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already registered"
+            )
+        
+        if users_collection.find_one({"email": user.email}):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+        
+        # Hash password and create user
+        hashed_password = get_password_hash(user.password)
+        user_doc = {
+            "username": user.username,
+            "email": user.email,
+            "hashed_password": hashed_password,
+            "created_at": datetime.now(timezone.utc)
+        }
+        
+        result = users_collection.insert_one(user_doc)
+        user_doc["_id"] = str(result.inserted_id)
+        
+        return UserResponse(**user_doc)
+    except HTTPException:
+        # Re-raise HTTP exceptions (user already exists, etc.)
+        raise
+    except Exception as e:
+        # Log the actual error for debugging
+        print(f"Registration error: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Registration failed: {str(e)}"
         )
-    
-    if users_collection.find_one({"email": user.email}):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
-    
-    # Hash password and create user
-    hashed_password = get_password_hash(user.password)
-    user_doc = {
-        "username": user.username,
-        "email": user.email,
-        "hashed_password": hashed_password,
-        "created_at": datetime.now(timezone.utc)
-    }
-    
-    result = users_collection.insert_one(user_doc)
-    user_doc["_id"] = str(result.inserted_id)
-    
-    return UserResponse(**user_doc)
 
 @app.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -296,6 +307,32 @@ async def delete_todo(todo_id: str, current_user: dict = Depends(get_current_use
 @app.get("/")
 async def root():
     return {"message": "Todo App API is running!"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint to test MongoDB connectivity"""
+    try:
+        # Test MongoDB connection
+        client.admin.command('ping')
+        
+        # Test database access
+        db_stats = db.command("dbstats")
+        
+        return {
+            "status": "healthy",
+            "mongodb": "connected",
+            "database": DATABASE_NAME,
+            "environment": ENVIRONMENT,
+            "collections": db_stats.get("collections", 0)
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "mongodb": "disconnected",
+            "error": str(e),
+            "database": DATABASE_NAME,
+            "environment": ENVIRONMENT
+        }
 
 if __name__ == "__main__":
     import uvicorn
