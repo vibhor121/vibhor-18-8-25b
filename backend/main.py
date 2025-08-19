@@ -39,8 +39,9 @@ allowed_origins = [
 if ENVIRONMENT == "production":
     # Add your actual production domains here
     allowed_origins.extend([
-        # "https://your-app-name.netlify.app",
-        # "https://your-custom-domain.com"
+        "https://vibhor-todo-app.netlify.app",
+        "https://amazing-gaufre-*.netlify.app",  # Netlify auto-generated names
+        # Add your custom Netlify domain here once you get it
     ])
 
 app.add_middleware(
