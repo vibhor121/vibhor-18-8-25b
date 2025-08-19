@@ -5,6 +5,7 @@ import Login from './components/Login'
 import Register from './components/Register'
 import TodoList from './components/TodoList'
 import Navbar from './components/Navbar'
+import config from './config'
 
 // Create Auth Context
 const AuthContext = createContext()
@@ -17,8 +18,8 @@ export const useAuth = () => {
   return context
 }
 
-// Configure axios
-axios.defaults.baseURL = 'http://localhost:8000'
+// Configure axios with environment-based URL
+axios.defaults.baseURL = config.API_BASE_URL
 
 function App() {
   const [user, setUser] = useState(null)

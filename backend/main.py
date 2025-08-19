@@ -21,13 +21,31 @@ SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production"
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
+# Environment detection
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+
 # Initialize FastAPI app
 app = FastAPI(title="Todo App API", version="1.0.0")
 
-# CORS middleware
+# CORS middleware - Updated for production
+allowed_origins = [
+    "http://localhost:3000", 
+    "http://127.0.0.1:3000",
+    "https://*.netlify.app",
+    "https://*.onrender.com"
+]
+
+# In production, you should replace the wildcards with your actual domains
+if ENVIRONMENT == "production":
+    # Add your actual production domains here
+    allowed_origins.extend([
+        # "https://your-app-name.netlify.app",
+        # "https://your-custom-domain.com"
+    ])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origin_regex="https://.*\.netlify\.app|https://.*\.onrender\.com|http://localhost:3000|http://127\.0\.0\.1:3000",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
