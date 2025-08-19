@@ -6,6 +6,7 @@ from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 import os
+import ssl
 from dotenv import load_dotenv
 from passlib.context import CryptContext
 from jose import JWTError, jwt
@@ -53,10 +54,33 @@ app.add_middleware(
 )
 
 # MongoDB connection
-client = MongoClient(MONGODB_URL)
-db = client[DATABASE_NAME]
-users_collection = db.users
-todos_collection = db.todos
+try:
+    client = MongoClient(
+        MONGODB_URL,
+        ssl=True,
+        ssl_cert_reqs=ssl.CERT_NONE,  # Disable SSL certificate verification
+        serverSelectionTimeoutMS=10000,
+        connectTimeoutMS=10000,
+        socketTimeoutMS=10000,
+        maxPoolSize=10,
+        retryWrites=True,
+        w='majority'
+    )
+    db = client[DATABASE_NAME]
+    users_collection = db.users
+    todos_collection = db.todos
+    
+    # Test connection on startup
+    client.admin.command('ping')
+    print(f"✅ Connected to MongoDB Atlas successfully!")
+    
+except Exception as e:
+    print(f"❌ MongoDB connection failed: {str(e)}")
+    # Don't fail the app startup, but log the error
+    client = None
+    db = None
+    users_collection = None
+    todos_collection = None
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
