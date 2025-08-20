@@ -9,6 +9,7 @@ import os
 import ssl
 import sqlite3
 import json
+import uuid
 from dotenv import load_dotenv
 from passlib.context import CryptContext
 from jose import JWTError, jwt
@@ -59,12 +60,69 @@ app.add_middleware(
 USE_MONGODB = True
 USE_SQLITE = False
 
+# Database adapter functions (defined first)
+def get_user_by_username(username: str):
+    if USE_MONGODB:
+        user = users_collection.find_one({"username": username})
+        if user:
+            user["_id"] = str(user["_id"])
+            return user
+        return None
+    else:
+        cursor = sqlite_conn.execute('SELECT * FROM users WHERE username = ?', (username,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                "_id": row[0],
+                "username": row[1],
+                "email": row[2],
+                "hashed_password": row[3],
+                "created_at": row[4]
+            }
+        return None
+
+def create_user(user_data: dict):
+    user_id = str(uuid.uuid4())
+    
+    if USE_MONGODB:
+        user_data["_id"] = ObjectId()
+        result = users_collection.insert_one(user_data)
+        user_data["_id"] = str(result.inserted_id)
+        return user_data
+    else:
+        sqlite_conn.execute(
+            'INSERT INTO users (id, username, email, hashed_password, created_at) VALUES (?, ?, ?, ?, ?)',
+            (user_id, user_data["username"], user_data["email"], user_data["hashed_password"], 
+             user_data["created_at"].isoformat())
+        )
+        sqlite_conn.commit()
+        user_data["_id"] = user_id
+        return user_data
+
+def check_user_exists(username: str = None, email: str = None):
+    if USE_MONGODB:
+        if username and users_collection.find_one({"username": username}):
+            return True
+        if email and users_collection.find_one({"email": email}):
+            return True
+        return False
+    else:
+        if username:
+            cursor = sqlite_conn.execute('SELECT 1 FROM users WHERE username = ?', (username,))
+            if cursor.fetchone():
+                return True
+        if email:
+            cursor = sqlite_conn.execute('SELECT 1 FROM users WHERE email = ?', (email,))
+            if cursor.fetchone():
+                return True
+        return False
+
 # Try MongoDB first
 try:
     client = MongoClient(
         MONGODB_URL,
-        ssl=True,
-        ssl_cert_reqs=ssl.CERT_NONE,
+        tls=True,  # Use tls instead of ssl
+        tlsAllowInvalidCertificates=True,  # Allow invalid certificates
         serverSelectionTimeoutMS=5000,
         connectTimeoutMS=5000,
         socketTimeoutMS=5000,
