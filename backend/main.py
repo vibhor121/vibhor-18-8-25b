@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 import os
 import ssl
+import sqlite3
+import json
 from dotenv import load_dotenv
 from passlib.context import CryptContext
 from jose import JWTError, jwt
@@ -53,15 +55,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# MongoDB connection
+# Database configuration and connection
+USE_MONGODB = True
+USE_SQLITE = False
+
+# Try MongoDB first
 try:
     client = MongoClient(
         MONGODB_URL,
         ssl=True,
-        ssl_cert_reqs=ssl.CERT_NONE,  # Disable SSL certificate verification
-        serverSelectionTimeoutMS=10000,
-        connectTimeoutMS=10000,
-        socketTimeoutMS=10000,
+        ssl_cert_reqs=ssl.CERT_NONE,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=5000,
+        socketTimeoutMS=5000,
         maxPoolSize=10,
         retryWrites=True,
         w='majority'
@@ -70,17 +76,41 @@ try:
     users_collection = db.users
     todos_collection = db.todos
     
-    # Test connection on startup
+    # Test connection
     client.admin.command('ping')
     print(f"✅ Connected to MongoDB Atlas successfully!")
+    USE_MONGODB = True
     
 except Exception as e:
     print(f"❌ MongoDB connection failed: {str(e)}")
-    # Don't fail the app startup, but log the error
-    client = None
-    db = None
-    users_collection = None
-    todos_collection = None
+    print("🔄 Falling back to SQLite database...")
+    
+    # Fallback to SQLite
+    USE_MONGODB = False
+    USE_SQLITE = True
+    
+    # Create SQLite database
+    sqlite_conn = sqlite3.connect('/tmp/todoapp.db', check_same_thread=False)
+    sqlite_conn.execute('''CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        hashed_password TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )''')
+    
+    sqlite_conn.execute('''CREATE TABLE IF NOT EXISTS todos (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        completed BOOLEAN DEFAULT FALSE,
+        created_at TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )''')
+    
+    sqlite_conn.commit()
+    print("✅ SQLite database initialized successfully!")
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -132,11 +162,7 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 def get_user(username: str):
-    user = users_collection.find_one({"username": username})
-    if user:
-        user["_id"] = str(user["_id"])
-        return user
-    return None
+    return get_user_by_username(username)
 
 def authenticate_user(username: str, password: str):
     user = get_user(username)
@@ -180,13 +206,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 async def register_user(user: UserCreate):
     try:
         # Check if user already exists
-        if users_collection.find_one({"username": user.username}):
+        if check_user_exists(username=user.username):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Username already registered"
             )
         
-        if users_collection.find_one({"email": user.email}):
+        if check_user_exists(email=user.email):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
@@ -201,10 +227,10 @@ async def register_user(user: UserCreate):
             "created_at": datetime.now(timezone.utc)
         }
         
-        result = users_collection.insert_one(user_doc)
-        user_doc["_id"] = str(result.inserted_id)
+        created_user = create_user(user_doc)
+        created_user["id"] = created_user["_id"]
         
-        return UserResponse(**user_doc)
+        return UserResponse(**created_user)
     except HTTPException:
         # Re-raise HTTP exceptions (user already exists, etc.)
         raise
@@ -334,27 +360,41 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint to test MongoDB connectivity"""
+    """Health check endpoint to test database connectivity"""
     try:
-        # Test MongoDB connection
-        client.admin.command('ping')
-        
-        # Test database access
-        db_stats = db.command("dbstats")
-        
-        return {
-            "status": "healthy",
-            "mongodb": "connected",
-            "database": DATABASE_NAME,
-            "environment": ENVIRONMENT,
-            "collections": db_stats.get("collections", 0)
-        }
+        if USE_MONGODB:
+            # Test MongoDB connection
+            client.admin.command('ping')
+            db_stats = db.command("dbstats")
+            
+            return {
+                "status": "healthy",
+                "database": "mongodb",
+                "connected": True,
+                "database_name": DATABASE_NAME,
+                "environment": ENVIRONMENT,
+                "collections": db_stats.get("collections", 0)
+            }
+        else:
+            # Test SQLite connection
+            cursor = sqlite_conn.execute('SELECT COUNT(*) FROM users')
+            user_count = cursor.fetchone()[0]
+            
+            return {
+                "status": "healthy", 
+                "database": "sqlite",
+                "connected": True,
+                "database_name": "todoapp.db",
+                "environment": ENVIRONMENT,
+                "user_count": user_count
+            }
     except Exception as e:
         return {
             "status": "unhealthy",
-            "mongodb": "disconnected",
+            "database": "mongodb" if USE_MONGODB else "sqlite",
+            "connected": False,
             "error": str(e),
-            "database": DATABASE_NAME,
+            "database_name": DATABASE_NAME if USE_MONGODB else "todoapp.db",
             "environment": ENVIRONMENT
         }
 
